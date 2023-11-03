@@ -1,0 +1,166 @@
+---
+title: "STAT 545B Assignment 1 (B1)"
+author: "Saint"
+date: "2023-11-01"
+output: github_document
+---
+# Writing, documenting, using, and testing an R function 
+### clear environment, load packages
+```{r setup}
+rm(list = ls(all.names = TRUE)) 
+library(roxygen2) 
+library(tidyverse) # function relies on
+library(dplyr) # function relies on and contains data used in an example
+library("lazyeval") # function relies on
+library(datateachr) # contains data used in an example
+library(testthat) # to check somethings in the function work as they should
+```
+
+## Exercise 1: Make a Function +
+## Exercise 2: Document your Function 
+
+```{r function}
+#' Summarize numeric variables in long format data for each level of a grouping variable
+#'  
+#' This function is meant principally to summarize / produce descriptive statistics (e.g., the mean, standard deviation, minimum, etc.) of numeric variables in a data frame (df), across each unique level of a specified grouping / cluster variable (id). For example, if the input data set (df) came from a repeated measures design wherein the same 8 participants took maths, science, and English tests on 4 different occasions, you could apply this function to describe each participants' scores on each test across all 4 testing occasions (for easy comparison of, for example, Jamie's mean math score to Sandy's mean math score). In the example provided, the grouping /cluster variable (id) would be participant. 
+#' 
+#' @param df A data frame (intended for use on a tibble, table or frame in long format) containing a grouping variable. I named this df for simplicity (because the input is a data frame and this is a commonly-used abbreviation). 
+#' @param id A column in df (your data frame); your desired grouping variable (for example, participant ID in repeated measures data). I named this 'id' because when I wrote the function I had in mind a grouping variable / cluster variable of participant id / person who has more than one measurement point  (although this is not required nor is participant id the grouping variable used in the examples).
+#'
+#' @return Nothing; a data table (containing descriptive statistics for the numeric variables in the original data frame, grouped by the specified cluster variable) is produced when users store the output of the applied function (with '<-') (example 'dfnew <- SumByCluster(df, id)'. Follow with 'View(dfnew)')
+#' 
+#' @example
+#' SumByCluster(iris, Species)
+
+SumByCluster <- function(df, id) { 
+  
+  if(!"dplyr" %in% (.packages())){
+   stop('You need to load the package dplyr to run this function.' )
+  }
+  
+  if(!"tidyverse" %in% (.packages())){
+   stop('You need to load the package tidyverse to run this function.' )
+  }
+  
+    if(!"lazyeval" %in% (.packages())){
+   stop('You need to load the package lazyeval to run this function.' )
+    }
+  
+  if((!is_tibble(df))&&(!is.data.frame(df))&&(!is.table(df))){ 
+    stop('Check the structure of your data set. It ought to be a frame or tibble or table.')
+    }
+  
+
+  
+   df %>%
+     mutate(N_missing = rowSums(is.na(.))) %>%
+    group_by(.dots = lazyeval::lazy(id)) %>%
+    summarise(
+              mean =   across(where(is.numeric), mean, na.rm=TRUE),
+            	StdDev =  across(where(is.numeric), sd, na.rm=TRUE),
+             	min =  across(where(is.numeric), min, na.rm=TRUE),
+              Max = across(where(is.numeric), max, na.rm=TRUE),
+                           N_rows_in_DF = n(), 
+              TOTAL_N_of_NA_cells = sum(N_missing)) %>%
+     distinct_all(.)
+              
+   
+}
+
+```
+
+## Exercise 3: Include examples
+## Example 1
+### Summarize the numeric variables in iris, for each species
+```{r example1}
+head(iris)
+SumIrisbySpecies <- SumByCluster(iris, Species)
+head(SumIrisbySpecies)
+
+
+# Check #
+# Visual (non-exhaustive) check that means by group computed are the same as when we do it with base R:
+setosa <- iris[1:50, ] # subset iris to select only observations for setosa species (all in the first 50 rows)
+mean(setosa$Sepal.Length) # Consistent with our new summary table's mean$Sepal.Length for setosa (5.006)
+mean(setosa$Sepal.Width) # Consistent with our new summary table's mean$Sepal.Width for setosa (3.428)
+```
+
+## Example 2
+### Summarize the numeric variables in cancer_sample (from package: datateachr), for each sample diagnosis (malignant ('M') versus benign ('B'))
+
+```{r example2}
+head(cancer_sample)
+Sum_cancersample_by_diagnosis <- SumByCluster(cancer_sample[-1], diagnosis)
+head(Sum_cancersample_by_diagnosis)
+```
+
+## Example 3
+### Summarize the numeric variables in storms (from package: dplyr), for each person (this one takes a little longer on my end)
+```{r example3}
+# testing: does this work okay with a bigger data frame? # try storms from the dplyr package
+dim(dplyr::storms)
+head(storms)
+SumStormsbySubJID <- SumByCluster(storms, name) # this does yield warnings because some variables are totally empty for some people / defined clusters, so we get 'inf' etc., in descriptive columns. At first glance such warnings appear informative yet benign. 
+head(SumStormsbySubJID)
+```
+
+## Exercise 4: Test the Function 
+```{r testing}
+
+test_that("Test halt + message for incorrect class of <df>", {
+  expect_error(SumByCluster(cancer_sample$ID, diagnosis), "ought to be a frame or tibble or table")
+}) # this works
+
+test_that("runs if your cluster variable exists in your data frame, returns error otherwise", {
+  expect_error(SumByCluster(cancer_sample, fruit), "not found")
+  expect_no_error(SumByCluster(cancer_sample, diagnosis))
+}) # works 
+
+
+test_that("returns data frame with same number of rows as unique grouping/cluster variables in the original data frame", {
+  expect_equal(nrow(SumByCluster(iris, Species)), length(unique(iris$Species)))
+    expect_equal(nrow(SumByCluster(cancer_sample, diagnosis)), length(unique(cancer_sample$diagnosis)))
+    expect_equal(nrow(SumStormsbySubJID), length(unique(storms$name))) 
+    
+}) # this works too - last line is the summary df from running the function on storms with cluster variable: 'name' (as above in my example) ; it just takes a long time to evaluate this; I think you can comment out the last check here if you didn't run that example above (so 'SumStormsbySubJID' is not in your environment.)
+
+
+test_that("counts observations per cluster and puts this in variable 'N_rows_in_DF' that the function is supposed to make", {
+  expect_contains((SumByCluster(cancer_sample, diagnosis)$N_rows_in_DF), c(sum(cancer_sample$diagnosis=="B"), sum(cancer_sample$diagnosis=="M")))
+  expect_contains((SumByCluster(iris, Species)$N_rows_in_DF), c(sum(iris$Species=="setosa"), sum(iris$Species=="versicolor"),  sum(iris$Species=="virginica")))
+}) # works
+
+```
+
+### last test: detach tidyverse and make sure we get an error and the correct error message, because this function needs tidyverse loaded
+### Note: please run this block in sequence
+```{r testwithouttidyverse}
+
+detach("package:tidyverse", unload=TRUE) # unload the package we need to make sure when we try to run the function without it we get the right error
+
+test_that("yeilds error message without correct packages", {
+  expect_error(SumByCluster(iris, Species), "You need to load the package tidyverse")
+})
+
+library(tidyverse) # load tidyverse back in so the function works
+
+```
+
+### References used for writing the function
+```{r references}
+#References  
+# [1] El-Neklawy (2015): https://medium.com/optima-blog/writing-your-own-dplyr-functions-a1568720db0d (for use of lazeval package) # Edit: sorry - I should have used {{}} instead for id variable
+# [2] Gao et al., (2023). Worksheet B1 from stat 545 https://stat545.stat.ubc.ca/course/ (mainly for structure adding a warning to the function)
+# [3] Ubiqum Code Academy (2015) on RPubs: https://rpubs.com/Mentors_Ubiqum/list_packages (for how to check if a package is in the environment)
+# [4] Wickham et al. (n.d.) Dplyr documentation:  https://dplyr.tidyverse.org/reference/group_by.html (for review of what input format dplyr::group_by accepts)
+```
+
+
+
+
+
+
+
+    
+    
+  
